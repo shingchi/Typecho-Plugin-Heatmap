@@ -5,6 +5,10 @@
 
 > 显示最近一年文章发布的热力图
 
+## 演示
+
+![演示图片](https://cdn.jsdelivr.net/gh/shingchi/Typecho-Plugin-Heatmap@main/demo.png)
+
 ## 使用方法
 
 在需要显示的模板位置，添加以下代码
@@ -14,3 +18,4 @@
 # 或者直接传入配色名称和显示语言，支持配色和语言请查看后台
 <?php \TypechoPlugin\Heatmap\Plugin::output($colorScheme, $labelLang); ?>
 ```
+
