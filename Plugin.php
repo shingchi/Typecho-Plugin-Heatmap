@@ -3,9 +3,11 @@
 namespace TypechoPlugin\Heatmap;
 
 use Typecho\Db;
+use Typecho\Date;
 use Typecho\Plugin\PluginInterface;
 use Typecho\Widget\Helper\Form;
 use Typecho\Widget\Helper\Form\Element\Radio;
+use Typecho\Widget\Helper\Form\Element\Text;
 use Widget\Base\Contents;
 use Widget\Options;
 
@@ -14,7 +16,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
 }
 
 /**
- * 文章发布热力图，展示当前年份全年发布记录
+ * 文章发布热力图
  *
  * @package  Heatmap
  * @author   shingchi
@@ -41,6 +43,17 @@ class Plugin implements PluginInterface
      */
     public static function config(Form $form): void
     {
+        // 统计时间范围
+        $timeRange = new Text(
+            'timeRange',
+            NULL,
+            364,
+            '统计时间范围',
+            '选择热力图统计的时间跨度, 默认最近一年 (364 天), 半年为 (181 天), 设置的天数比要显示的天数少一天'
+        );
+        $form->addInput($timeRange);
+
+        // 配色方案
         $colorScheme = new Radio(
             'colorScheme',
             [
@@ -55,6 +68,7 @@ class Plugin implements PluginInterface
         );
         $form->addInput($colorScheme);
 
+        // 标签语言
         $labelLang = new Radio(
             'labelLang',
             [
@@ -91,39 +105,58 @@ class Plugin implements PluginInterface
      * 直接输出热力图 HTML
      * 模板调用示例：\TypechoPlugin\Heatmap\Plugin::output();
      *
+     * @param int|null $timeRange 覆盖后台统计时间范围设置（可选）
      * @param string|null $colorScheme 覆盖后台配色设置（可选）
+     * @param string|null $labelLang   覆盖后台标签语言设置（可选）
      */
-    public static function output(?string $colorScheme = null, ?string $labelLang = null): void
+    public static function output(int $timeRange = null, ?string $colorScheme = null, ?string $labelLang = null): void
     {
-        echo self::render($colorScheme, $labelLang);
+        echo self::render($timeRange, $colorScheme, $labelLang);
     }
 
     /**
      * 返回热力图 HTML 字符串
      *
+     * @param int|null $timeRange 覆盖后台统计时间范围设置（可选）
      * @param string|null $colorScheme 覆盖后台配色设置（可选）
      * @param string|null $labelLang   覆盖后台标签语言设置（可选）
      */
-    private static function render(?string $colorScheme = null, ?string $labelLang = null): string
+    private static function render(int $timeRange = null, ?string $colorScheme = null, ?string $labelLang = null): string
     {
         // 1. 读取插件配置
-        $options       = Options::alloc();
-        $pluginOptions = $options->plugin('Heatmap');
-        $cfgScheme     = $pluginOptions->colorScheme ?? 'green';
-        $cfgLabelLang  = $pluginOptions->labelLang     ?? 'en';
+        $options        = Options::alloc()->plugin('Heatmap');
+        $cfgScheme      = $options->colorScheme     ?? 'green';
+        $cfgLabelLang   = $options->labelLang       ?? 'en';
+        $cfgTimeRange   = (int)($options->timeRange ?? 364);
 
-        $colorScheme   = $colorScheme ?? $cfgScheme;
-        $labelLang     = $labelLang ?? $cfgLabelLang;
+        $colorScheme    = $colorScheme  ?? $cfgScheme;
+        $labelLang      = $labelLang    ?? $cfgLabelLang;
+        $timeRange      = $timeRange    ?? $cfgTimeRange;
 
         // 2. 配色方案
         $colors = self::$palettes[$colorScheme] ?? self::$palettes['green'];
 
         // 3. 时间范围：最近一年（今天往前推 364 天，共 365 天）
-        // $today      = strtotime(date('Y-m-d'));          // 今天 00:00:00
-        // 从配置中获取时间戳
-        $today      = strtotime(date('Y-m-d', $options->time)); // 今天 00:00:00
-        $rangeEnd   = $today + 86399;                           // 今天 23:59:59
-        $rangeStart = $today - 364 * 86400;                     // 365 天前 00:00:00
+        // 设置统计标签
+        if ($timeRange === 364) {
+            $rangeText = ($labelLang === 'zh') ? '近一年，' : 'The past year, ';
+        } elseif ($timeRange === 181) {
+            $rangeText = ($labelLang === 'zh') ? '近半年，' : 'The past half year, ';
+        } else {
+            $rangeText = ($labelLang === 'zh')
+                ? '近 ' . ($timeRange + 1) . ' 天，'
+                : 'The past ' . ($timeRange + 1) . ' days, ';
+            // 时间范围小于 148 天时，不显示时间标签
+            if ($timeRange < 148) {
+                $rangeText = '';
+            }
+        }
+
+        $timestamp = Date::time()
+            + (Date::$timezoneOffset - Date::$serverTimezoneOffset);  // 获取当前国际化时间戳
+        $today     = strtotime(date('Y-m-d', $timestamp));            // 今天 00:00:00
+        $rangeEnd  = $today + 86399;                                  // 今天 23:59:59
+        $rangeStart = $today - $timeRange * 86400;                    // $timeRange 天前 00:00:00
 
         // 4. 查询数据库：当年所有已发布文章
         $db   = Db::get();
@@ -139,8 +172,12 @@ class Plugin implements PluginInterface
         // 计算总文章数
         $totalCount = $posts->size($query);
         $jsTotalLabels = ($labelLang === 'zh')
-            ? json_encode('共 ' . $totalCount . ' 篇')
-            : json_encode('Total of ' . $totalCount . ' articles');
+            ? json_encode($rangeText . '共 ' . $totalCount . ' 篇')
+            : json_encode($rangeText . $totalCount . ' articles');
+        // 时间范围小于 98 天时，不显示统计标签
+        if ($timeRange < 98) {
+            $jsTotalLabels = json_encode('');
+        }
 
         // 按日期分组：counts 用于颜色深度，articles 用于 tooltip 内容
         $counts   = [];
@@ -153,13 +190,15 @@ class Plugin implements PluginInterface
                 'url'   => $posts->permalink,
             ];
         }
-        $maxCount = $counts ? max($counts) : 1;
+        // $maxCount = $counts ? max($counts) : 1;
+        // 以4篇为最大深度，根据实际情况调整
+        $maxCount = 4;
 
         // 5. 构建日历网格
-        $startDow  = (int)date('w', $rangeStart);
+        $startDow  = ((int)date('w', $rangeStart) + 6) % 7; // 周一=0 … 周日=6
         $gridStart = $rangeStart - $startDow * 86400;
 
-        $endDow  = (int)date('w', $today);
+        $endDow  = ((int)date('w', $today) + 6) % 7;        // 周一=0 … 周日=6
         $gridEnd = $today + (6 - $endDow) * 86400;
 
         $weeks = [];
@@ -239,10 +278,10 @@ class Plugin implements PluginInterface
         $jsColorMap  = json_encode($colorMap);
         $jsMonthLbls = json_encode($monthLabels);
         $jsColors    = json_encode($colors);
-        // 行标签：英文显示 Mon/Wed/Fri，中文显示 一/三/五
+        // 行标签：英文显示 Mon/Wed/Fri，中文显示 一/三/五/日
         $jsRowLabels = ($labelLang === 'zh')
-            ? json_encode([1 => '一', 3 => '三', 5 => '五'])
-            : json_encode([1 => 'Mon', 3 => 'Wed', 5 => 'Fri']);
+            ? json_encode([0 => '一', 2 => '三', 4 => '五', 6 => '日'])
+            : json_encode([0 => 'Mon', 2 => 'Wed', 4 => 'Fri', 6 => 'Sun']);
         $jsLegendLess = json_encode($labelLang === 'zh' ? '少' : 'Less');
         $jsLegendMore = json_encode($labelLang === 'zh' ? '多' : 'More');
         $jsLegendY   = $topOffset + 7 * $step + (int)round($legendH / 2) + 2; // 图例基准 Y
@@ -266,7 +305,7 @@ class Plugin implements PluginInterface
 </div>
 
 <style>
-.heatmap-wrap{position:relative;display:flex;justify-content:center;padding-top:16px;padding-bottom:10px;border: 1px solid #d1d9e0;border-top-left-radius: 6px;border-top-right-radius: 6px;}
+.heatmap-wrap{position:relative;display:flex;justify-content:center;margin-bottom:1em;padding-top:16px;padding-bottom:10px;border: 1px solid #d1d9e0;border-top-left-radius: 6px;border-top-right-radius: 6px;}
 #<?= $uid ?>_tip{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#24292f;}
 #<?= $uid ?>_tip .hm-date{color:#57606a;font-size:12px;}
 #<?= $uid ?>_tip ul{margin:0;padding:0;list-style:none;}
@@ -321,7 +360,7 @@ class Plugin implements PluginInterface
     ctx.fillText(monthLabels[wi], LBL_W + parseInt(wi, 10) * STEP, 8);
   }
 
-  /* 行标签 Mon / Wed / Fri */
+  /* 行标签 Mon / Wed / Fri / Sun */
   ctx.textAlign = 'right';
   for (var ri in rowLabels) {
     var ry = TOP + parseInt(ri, 10) * STEP + CELL / 2;

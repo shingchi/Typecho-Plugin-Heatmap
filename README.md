@@ -16,6 +16,6 @@
 ```php
 <?php \TypechoPlugin\Heatmap\Plugin::output(); ?>
 # 或者直接传入配色名称和显示语言，支持配色和语言请查看后台
-<?php \TypechoPlugin\Heatmap\Plugin::output($colorScheme, $labelLang); ?>
+<?php \TypechoPlugin\Heatmap\Plugin::output($timeRange, $colorScheme, $labelLang); ?>
 ```
 
