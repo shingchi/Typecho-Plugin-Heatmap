@@ -109,7 +109,7 @@ class Plugin implements PluginInterface
      * @param string|null $colorScheme 覆盖后台配色设置（可选）
      * @param string|null $labelLang   覆盖后台标签语言设置（可选）
      */
-    public static function output(int $timeRange = null, ?string $colorScheme = null, ?string $labelLang = null): void
+    public static function output(?int $timeRange = null, ?string $colorScheme = null, ?string $labelLang = null): void
     {
         echo self::render($timeRange, $colorScheme, $labelLang);
     }
@@ -121,7 +121,7 @@ class Plugin implements PluginInterface
      * @param string|null $colorScheme 覆盖后台配色设置（可选）
      * @param string|null $labelLang   覆盖后台标签语言设置（可选）
      */
-    private static function render(int $timeRange = null, ?string $colorScheme = null, ?string $labelLang = null): string
+    private static function render(?int $timeRange = null, ?string $colorScheme = null, ?string $labelLang = null): string
     {
         // 1. 读取插件配置
         $options        = Options::alloc()->plugin('Heatmap');
